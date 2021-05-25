@@ -12,6 +12,7 @@ using Xamarin.Forms.Xaml;
 using XF.Material.Forms.Resources;
 using XF.Material.Forms.UI.Dialogs;
 using XF.Material.Forms.UI.Internals;
+using Keyboard = Xamarin.Forms.Keyboard;
 
 namespace XF.Material.Forms.UI
 {
@@ -24,7 +25,7 @@ namespace XF.Material.Forms.UI
     {
         public static readonly BindableProperty AlwaysShowUnderlineProperty = BindableProperty.Create(nameof(AlwaysShowUnderline), typeof(bool), typeof(MaterialTextField), false);
 
-        public static new readonly BindableProperty BackgroundColorProperty = BindableProperty.Create(nameof(BackgroundColor), typeof(Color), typeof(MaterialTextField), Color.FromHex("#DCDCDC"));
+        public static readonly BindableProperty CardBackgroundColorProperty = BindableProperty.Create(nameof(CardBackgroundColor), typeof(Color), typeof(MaterialTextField), Color.FromHex("#DCDCDC"));
 
         public static readonly BindableProperty ChoiceSelectedCommandProperty = BindableProperty.Create(nameof(ChoiceSelectedCommand), typeof(ICommand), typeof(MaterialTextField));
 
@@ -34,33 +35,32 @@ namespace XF.Material.Forms.UI
 
         private static void SelectedChoicePropertyChange(BindableObject bindable, object oldValue, object newValue)
         {
-            var control = bindable as MaterialTextField;
-            if (control == null)
-            {
-                return;
-            }
+            if (bindable is MaterialTextField control)
+                control.SetSelectedChoice(newValue);
+        }
 
-            if (control.Choices?.Count > 0)
+        private void SetSelectedChoice(object selectedChoice)
+        {
+            var choices = Choices;
+            if (choices?.Count > 0)
             {
-                if (newValue != null)
+                // 1. Get selected value index
+                // 1.1 Current selected index and get selected index should not same.
+                // 2. set control selected index
+
+                var index = choices.IndexOf(selectedChoice);
+                if (_selectedIndex != index)
                 {
-                    // 1. Get selected value index
-                    // 1.1 Current selected index and get selected index should not same.
-                    // 2. set control selected index
+                    _selectedIndex = index;
+                    Text = index >= 0 ? _choicesResults[index] : null;
+                    AnimateToInactiveOrFocusedStateOnStart(this, false);
 
-                    // List<object> data = control.Choices as List<object>;
-
-                    var index = control.Choices.IndexOf(newValue);
-                    if (control._selectedIndex != index)
-                    {
-                        control._selectedIndex = index;
-                        control.Text = control._choicesResults[index];
-                        control.AnimateToInactiveOrFocusedStateOnStart(control);
-
-                        control.UpdateCounter();
-                        // control.OnSelectChoices();
-                    }
+                    UpdateCounter();
                 }
+            }
+            else
+            {
+                Text = null;
             }
         }
 
@@ -192,14 +192,14 @@ namespace XF.Material.Forms.UI
         /// <summary>
         /// Gets or sets the background color of this text field.
         /// </summary>
-        public new Color BackgroundColor
+        public Color CardBackgroundColor
         {
-            get => (Color)GetValue(BackgroundColorProperty);
-            set => SetValue(BackgroundColorProperty, value);
+            get => (Color)GetValue(CardBackgroundColorProperty);
+            set => SetValue(CardBackgroundColorProperty, value);
         }
 
         /// <summary>
-        /// Gets or sets the collection of objects which the user will choose from. This is required when <see cref="InputType"/> is set to <see cref="MaterialTextFieldInputType.Choice"/>.
+        /// Gets or sets the collection of objects which the user will choose from. This is required when <see cref="InputType"/> is set to <see cref="MaterialTextFieldInputType.Choice"/> or <see cref="MaterialTextFieldInputType.SingleImmediateChoice"/>.
         /// </summary>
         public IList Choices
         {
@@ -220,7 +220,7 @@ namespace XF.Material.Forms.UI
 
 
         /// <summary>
-        /// Gets or sets the command that will execute if a choice was selected when the <see cref="InputType"/> is set to <see cref="MaterialTextFieldInputType.Choice"/>.
+        /// Gets or sets the command that will execute if a choice was selected when the <see cref="InputType"/> is set to <see cref="MaterialTextFieldInputType.Choice"/> or <see cref="MaterialTextFieldInputType.SingleImmediateChoice"/>.
         /// </summary>
         public ICommand ChoiceSelectedCommand
         {
@@ -609,14 +609,15 @@ namespace XF.Material.Forms.UI
         {
             base.OnBindingContextChanged();
 
-            AnimateToInactiveOrFocusedStateOnStart(BindingContext);
+            AnimateToInactiveOrFocusedStateOnStart(BindingContext, true);
         }
 
         protected override void OnParentSet()
         {
             base.OnParentSet();
 
-            AnimateToInactiveOrFocusedStateOnStart(Parent);
+            OnBackgroundColorChanged(); //For global styles
+            AnimateToInactiveOrFocusedStateOnStart(Parent, true);
         }
 
         /// <inheritdoc />
@@ -751,7 +752,7 @@ namespace XF.Material.Forms.UI
             anim.Commit(this, "FocusAnimation", rate: 2, length: (uint)(Device.RuntimePlatform == Device.iOS ? 500 : AnimationDuration * 1000), easing: _animationCurve);
         }
 
-        private void AnimateToInactiveOrFocusedStateOnStart(object startObject)
+        private void AnimateToInactiveOrFocusedStateOnStart(object startObject, bool isStart)
         {
             var placeholderEndY = -(entry.FontSize * 0.8);
             var placeholderEndFont = entry.FontSize * 0.75;
@@ -760,6 +761,9 @@ namespace XF.Material.Forms.UI
             {
                 placeholder.TextColor = PlaceholderColor;
             }
+
+            if (isStart && startObject != null)
+                SetTrailingIcon();
 
             if (startObject != null && !string.IsNullOrEmpty(Text))
             {
@@ -771,26 +775,20 @@ namespace XF.Material.Forms.UI
 
                 Device.BeginInvokeOnMainThread(() =>
                 {
-                    var anim = new Animation();
 
                     if (FloatingPlaceholderEnabled)
                     {
-                        anim.Add(0.0, AnimationDuration, new Animation(v => placeholder.FontSize = v, entry.FontSize, placeholderEndFont, _animationCurve));
-                        anim.Add(0.0, AnimationDuration, new Animation(v => placeholder.TranslationY = v, placeholder.TranslationY, placeholderEndY, _animationCurve, () =>
-                        {
-                            placeholder.TextColor = HasError ? ErrorColor : FloatingPlaceholderColor;
-                            entry.Opacity = 1;
-                        }));
+                        placeholder.TranslationY = placeholderEndY;
+                        placeholder.TextColor = HasError ? ErrorColor : FloatingPlaceholderColor;
+                        entry.Opacity = 1;
                     }
 
                     if (ShouldAnimateUnderline)
                     {
                         underline.Color = HasError ? ErrorColor : TintColor;
                         underline.HeightRequest = 1;
-                        anim.Add(0.0, AnimationDuration, new Animation(v => underline.WidthRequest = v, 0, Width, _animationCurve, () => underline.HorizontalOptions = LayoutOptions.FillAndExpand));
+                        underline.HorizontalOptions = LayoutOptions.FillAndExpand;
                     }
-
-                    anim.Commit(this, "Anim2", rate: 2, length: (uint)(AnimationDuration * 1000), easing: _animationCurve);
                 });
 
                 entry.Opacity = 1;
@@ -868,15 +866,7 @@ namespace XF.Material.Forms.UI
 
             Device.BeginInvokeOnMainThread(async () =>
             {
-                if (InputType == MaterialTextFieldInputType.Choice)
-                {
-                    trailingIcon.Source = "xf_arrow_dropdown";
-                    trailingIcon.TintColor = TextColor;
-                }
-                else
-                {
-                    trailingIcon.IsVisible = false;
-                }
+                SetTrailingIcon();
 
                 var accentColor = TintColor;
                 placeholder.TextColor = accentColor;
@@ -900,6 +890,24 @@ namespace XF.Material.Forms.UI
             });
         }
 
+        private void SetTrailingIcon()
+        {
+            if (InputType == MaterialTextFieldInputType.Choice || InputType == MaterialTextFieldInputType.SingleImmediateChoice)
+            {
+                trailingIcon.Source = "xf_arrow_dropdown";
+                trailingIcon.TintColor = TextColor;
+            }
+            if (InputType == MaterialTextFieldInputType.CommandChoice)
+            {
+                trailingIcon.Source = "xf_arrow_right";
+                trailingIcon.TintColor = TextColor;
+            }
+            else
+            {
+                trailingIcon.IsVisible = false;
+            }
+        }
+
         private void DeviceDisplay_MainDisplayInfoChanged(object sender, DisplayInfoChangedEventArgs e)
         {
             if (e.DisplayInfo.Orientation != _lastDeviceDisplay.Orientation)
@@ -918,9 +926,17 @@ namespace XF.Material.Forms.UI
 
         private void Entry_Focused(object sender, FocusEventArgs e)
         {
-            FocusCommand?.Execute(entry.IsFocused);
-            Focused?.Invoke(this, e);
-            UpdateCounter();
+            if (InputType == MaterialTextFieldInputType.Choice || InputType == MaterialTextFieldInputType.SingleImmediateChoice
+                                                               || InputType == MaterialTextFieldInputType.CommandChoice)
+            {
+                ((View)sender).Unfocus();
+            }
+            else
+            {
+                FocusCommand?.Execute(entry.IsFocused);
+                Focused?.Invoke(this, e);
+                UpdateCounter();
+            }
         }
 
         private void Entry_PropertyChanged(object sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -1006,9 +1022,9 @@ namespace XF.Material.Forms.UI
                     var propInfo = listType.GetProperty(ChoicesBindingName);
 
                     if (propInfo != null)
-                    { 
+                    {
                         var propValue = propInfo.GetValue(item);
-                        choice =propValue.ToString();
+                        choice = propValue?.ToString();
                     }
                 }
 
@@ -1048,9 +1064,14 @@ namespace XF.Material.Forms.UI
             persistentUnderline.Color = UnderlineColor;
         }
 
-        private void OnBackgroundColorChanged(Color backgroundColor)
+        private void OnBackgroundColorChanged()
         {
-            backgroundCard.BackgroundColor = backgroundColor;
+            if (base.BackgroundColor != Color.Transparent)
+            {
+                if (base.BackgroundColor != Color.Default)
+                    CardBackgroundColor = base.BackgroundColor;
+                base.BackgroundColor = Color.Transparent;
+            }
         }
 
         private void OnChoicesChanged(ICollection choices)
@@ -1064,6 +1085,8 @@ namespace XF.Material.Forms.UI
                 _choices = null;
                 _choicesResults = null;
             }
+
+            SetSelectedChoice(SelectedChoice);
         }
 
         private void OnEnabledChanged(bool isEnabled)
@@ -1134,6 +1157,9 @@ namespace XF.Material.Forms.UI
 
         private void OnInputTypeChanged()
         {
+            entry.IsReadOnly = false;
+            entry.Keyboard = Keyboard.Default;
+
             switch (InputType)
             {
                 case MaterialTextFieldInputType.Chat:
@@ -1200,14 +1226,20 @@ namespace XF.Material.Forms.UI
                     break;
 
                 case MaterialTextFieldInputType.Choice:
+                case MaterialTextFieldInputType.SingleImmediateChoice:
+                case MaterialTextFieldInputType.CommandChoice:
+                    break;
 
+                case MaterialTextFieldInputType.ReadOnly:
+                    entry.IsReadOnly = true;
                     break;
             }
 
             // Hint: Will use this for MaterialTextArea
             // entry.AutoSize = inputType == MaterialTextFieldInputType.MultiLine ? EditorAutoSizeOption.TextChanges : EditorAutoSizeOption.Disabled;
-            _gridContainer.InputTransparent = InputType == MaterialTextFieldInputType.Choice;
-            trailingIcon.IsVisible = InputType == MaterialTextFieldInputType.Choice;
+            var isChoice = InputType == MaterialTextFieldInputType.Choice || InputType == MaterialTextFieldInputType.SingleImmediateChoice || InputType == MaterialTextFieldInputType.CommandChoice;
+            _gridContainer.InputTransparent = isChoice;
+            trailingIcon.IsVisible = isChoice;
 
             entry.IsNumericKeyboard = InputType == MaterialTextFieldInputType.Telephone || InputType == MaterialTextFieldInputType.Numeric;
             entry.IsPassword = InputType == MaterialTextFieldInputType.Password || InputType == MaterialTextFieldInputType.NumericPassword;
@@ -1256,16 +1288,25 @@ namespace XF.Material.Forms.UI
             entry.ReturnCommandParameter = parameter;
         }
 
-        private void OnReturnTypeChangedd(ReturnType returnType)
+        private void OnReturnTypeChanged(ReturnType returnType)
         {
             entry.ReturnType = returnType;
         }
 
         private async Task OnSelectChoices()
         {
+            if (InputType == MaterialTextFieldInputType.CommandChoice)
+            {
+                ChoiceSelected?.Invoke(this, new SelectedItemChangedEventArgs(null, -1));
+                ChoiceSelectedCommand?.Execute(null);
+                return;
+            }
+
             if (Choices == null || Choices?.Count <= 0)
             {
-                throw new InvalidOperationException("The property `Choices` is null or empty");
+                //throw new InvalidOperationException("The property `Choices` is null or empty");
+                Console.WriteLine("Error in MaterialTextField: the property `Choices` is null or empty");
+                return;
             }
             _choices = GetChoices(out _choicesResults);
 
@@ -1277,11 +1318,11 @@ namespace XF.Material.Forms.UI
 
             if (_selectedIndex >= 0)
             {
-                result = await MaterialDialog.Instance.SelectChoiceAsync(title, _choices, _selectedIndex, confirmingText, dismissiveText, configuration);
+                result = await MaterialDialog.Instance.SelectChoiceAsync(title, _choices, _selectedIndex, confirmingText, dismissiveText, configuration, InputType == MaterialTextFieldInputType.SingleImmediateChoice);
             }
             else
             {
-                result = await MaterialDialog.Instance.SelectChoiceAsync(title, _choices, confirmingText, dismissiveText, configuration);
+                result = await MaterialDialog.Instance.SelectChoiceAsync(title, _choices, confirmingText, dismissiveText, configuration, InputType == MaterialTextFieldInputType.SingleImmediateChoice);
             }
 
             if (result >= 0)
@@ -1294,28 +1335,33 @@ namespace XF.Material.Forms.UI
 
         private void OnTextChanged(string text)
         {
-            if (InputType == MaterialTextFieldInputType.Choice && !string.IsNullOrEmpty(text) && _choicesResults?.Contains(text) == false)
-            {
-                Debug.WriteLine($"The `Text` property value `{Text}` does not match any item in the collection `Choices`.");
-                Text = null;
-                return;
-            }
+            var isChoice = InputType == MaterialTextFieldInputType.Choice || InputType == MaterialTextFieldInputType.SingleImmediateChoice;
 
-            if (InputType == MaterialTextFieldInputType.Choice && !string.IsNullOrEmpty(text))
+            if (isChoice)
             {
-                var selectedChoice = GetSelectedChoice(_selectedIndex);
-                SelectedChoice = selectedChoice;
-                ChoiceSelected?.Invoke(this, new SelectedItemChangedEventArgs(selectedChoice, _selectedIndex));
-                ChoiceSelectedCommand?.Execute(selectedChoice);
-            }
-            else if (InputType == MaterialTextFieldInputType.Choice && string.IsNullOrEmpty(text))
-            {
-                _selectedIndex = -1;
+                if (!string.IsNullOrEmpty(text) && _choicesResults?.Contains(text) == false)
+                {
+                    Debug.WriteLine($"The `Text` property value `{Text}` does not match any item in the collection `Choices`.");
+                    Text = null;
+                    return;
+                }
+
+                if (!string.IsNullOrEmpty(text))
+                {
+                    var selectedChoice = GetSelectedChoice(_selectedIndex);
+                    SelectedChoice = selectedChoice;
+                    ChoiceSelected?.Invoke(this, new SelectedItemChangedEventArgs(selectedChoice, _selectedIndex));
+                    ChoiceSelectedCommand?.Execute(selectedChoice);
+                }
+                else if (string.IsNullOrEmpty(text))
+                {
+                    _selectedIndex = -1;
+                }
             }
 
             entry.Text = text;
 
-            AnimateToInactiveOrFocusedStateOnStart(this);
+            AnimateToInactiveOrFocusedStateOnStart(this, false);
             UpdatePlaceholderVisibility();
             UpdateCounter();
         }
@@ -1378,12 +1424,12 @@ namespace XF.Material.Forms.UI
                 { nameof(HelperTextFontFamily), () => OnHelpertTextFontFamilyChanged(HelperTextFontFamily) },
                 { nameof(HelperTextColor), () => OnHelperTextColorChanged(HelperTextColor) },
                 { nameof(IsEnabled), () => OnEnabledChanged(IsEnabled) },
-                { nameof(BackgroundColor), () => OnBackgroundColorChanged(BackgroundColor) },
+                { nameof(BackgroundColor), () => OnBackgroundColorChanged() },
                 { nameof(AlwaysShowUnderline), () => OnAlwaysShowUnderlineChanged(AlwaysShowUnderline) },
                 { nameof(MaxLength), () => OnMaxLengthChanged(MaxLength, IsMaxLengthCounterVisible) },
                 { nameof(ReturnCommand), () => OnReturnCommandChanged(ReturnCommand) },
                 { nameof(ReturnCommandParameter), () => OnReturnCommandParameterChanged(ReturnCommandParameter) },
-                { nameof(ReturnType), () => OnReturnTypeChangedd(ReturnType) },
+                { nameof(ReturnType), () => OnReturnTypeChanged(ReturnType) },
                 { nameof(ErrorColor), () => OnErrorColorChanged(ErrorColor) },
                 { nameof(UnderlineColor), () => OnUnderlineColorChanged(UnderlineColor) },
                 { nameof(HasError), () => OnHasErrorChanged() },

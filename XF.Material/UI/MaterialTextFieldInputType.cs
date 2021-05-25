@@ -15,6 +15,18 @@
         Url,
         Password,
         NumericPassword,
-        Choice
+        Choice,
+        /// <summary>
+        /// Same as Choice, but without OK button. Clicking an item will simulate a click on the OK button and close the dialog.
+        /// </summary>
+        SingleImmediateChoice,
+        /// <summary>
+        /// Triggers the command when clicked instead of focusing the input field
+        /// </summary>
+        CommandChoice,
+        /// <summary>
+        /// Does not allow changes, and does not gray out the control
+        /// </summary>
+        ReadOnly
     }
 }
